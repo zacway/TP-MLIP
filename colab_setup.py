@@ -6,6 +6,7 @@ Running it again is cheap: anything already installed is skipped.
 """
 
 import glob
+import importlib.metadata
 import os
 import site
 import subprocess
@@ -49,12 +50,17 @@ def _install_cp2k():
 
 
 def _install_python_packages():
+    # nglview is pinned: Colab fetches the widget's JavaScript from a CDN by version, and the frontends of
+    # nglview >= 3.1.4 are not on npm (the viewer stays blank). 3.0.8 also has no Python dependencies,
+    # whereas newer versions replace Colab's ipywidgets 7 with ipywidgets 8 and install JupyterLab.
     missing = []
-    for module, package in [('mdtraj', 'mdtraj'), ('nglview', 'nglview'), ('ase', 'ase')]:
+    for package, version in [('mdtraj', None), ('nglview', '3.0.8'), ('ase', None)]:
         try:
-            __import__(module)
-        except ImportError:
-            missing.append(package)
+            installed = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            installed = None
+        if installed is None or (version is not None and installed != version):
+            missing.append(package if version is None else f'{package}=={version}')
     if missing:
         print(f'Installing {" ".join(missing)}...', flush=True)
         _sh(f'{sys.executable} -m pip install -q {" ".join(missing)}')
