@@ -29,7 +29,11 @@ NNP_TOOLS = ['nnp-scaling', 'nnp-train', 'nnp-dataset', 'nnp-convert', 'nnp-pred
 
 
 def _sh(cmd):
-    subprocess.run(cmd, shell=True, check=True)
+    # Colab does not show the output of child processes, so print it ourselves if the command fails
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(result.stdout[-3000:], result.stderr[-3000:], sep='\n')
+        raise subprocess.CalledProcessError(result.returncode, cmd)
 
 
 def _install_n2p2():
@@ -50,19 +54,21 @@ def _install_cp2k():
 
 
 def _install_python_packages():
-    # nglview is pinned: Colab fetches the widget's JavaScript from a CDN by version, and the frontends of
-    # nglview >= 3.1.4 are not on npm (the viewer stays blank). 3.0.8 also has no Python dependencies,
-    # whereas newer versions replace Colab's ipywidgets 7 with ipywidgets 8 and install JupyterLab.
+    # nglview is pinned to 3.0.8: Colab fetches the widget's JavaScript from a CDN by version, and the
+    # frontends of nglview >= 3.1.4 are not on npm (the viewer stays blank); they also replace Colab's
+    # ipywidgets 7 with ipywidgets 8. 3.0.8 only exists as an sdist that no longer builds on Python 3.13
+    # (its build imports the removed `pipes` module), so we ship a pure-Python wheel built on Python 3.12.
     missing = []
-    for package, version in [('mdtraj', None), ('nglview', '3.0.8'), ('ase', None)]:
+    for package, version, source in [('mdtraj', None, 'mdtraj'), ('ase', None, 'ase'),
+                                     ('nglview', '3.0.8', f'{TP_DIR}/wheels/nglview-3.0.8-py3-none-any.whl')]:
         try:
             installed = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
             installed = None
         if installed is None or (version is not None and installed != version):
-            missing.append(package if version is None else f'{package}=={version}')
+            missing.append(source)
     if missing:
-        print(f'Installing {" ".join(missing)}...', flush=True)
+        print(f'Installing {" ".join(os.path.basename(m) for m in missing)}...', flush=True)
         _sh(f'{sys.executable} -m pip install -q {" ".join(missing)}')
 
 
