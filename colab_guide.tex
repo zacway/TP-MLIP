@@ -1,0 +1,175 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage[version=4]{mhchem}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{tcolorbox}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage{qrcode}
+\usepackage[colorlinks=true,linkcolor=MidnightBlue,urlcolor=MidnightBlue]{hyperref}
+
+\lstset{basicstyle=\ttfamily\small,columns=fullflexible,keepspaces=true,
+        frame=single,framerule=0.3pt,rulecolor=\color{gray!60},backgroundcolor=\color{gray!6}}
+
+\newtcolorbox{keybox}[1]{colback=MidnightBlue!4,colframe=MidnightBlue!70,
+  fonttitle=\bfseries,title=#1,boxrule=0.6pt,arc=2pt}
+\newtcolorbox{warnbox}[1]{colback=BrickRed!4,colframe=BrickRed!70,
+  fonttitle=\bfseries,title=#1,boxrule=0.6pt,arc=2pt}
+
+% Colab menus and buttons
+\newcommand{\menu}[1]{\textsf{\textbf{#1}}}
+
+\title{\textbf{Running the MLIP tutorials on Google Colab}\\[4pt]
+\large Student guide for the three notebooks of \texttt{TP-MLIP}}
+\author{Machine-learned interatomic potentials --- hands-on session}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{minipage}[c]{0.70\textwidth}
+The three tutorials on machine-learned interatomic potentials (MLIPs) run on
+\textbf{Google Colab}. All you need is a web browser and a Google account.
+Nothing has to be installed on your computer: Colab gives you a Linux machine
+with 2 CPUs, and the first cell of each notebook installs everything else on
+it.
+
+\medskip
+Everything starts from the course page, which you can open with the QR code:
+\begin{center}
+\url{https://github.com/zacway/TP-MLIP}
+\end{center}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.25\textwidth}
+\centering\qrcode[nolink,height=3.6cm]{https://github.com/zacway/TP-MLIP}
+\end{minipage}
+\medskip
+
+%======================================================================
+\section{The three tutorials}
+%======================================================================
+
+Do them in order. Tutorials~1 and~2 each come with lesson notes that explain
+the theory and discuss the results: read them alongside the notebook. They are
+linked from the course page.
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Tutorial & Notebook & Computing time\\
+\midrule
+1. Zundel ion, \ce{H5O2+}                   & \texttt{zundel.ipynb}     & $\sim$10 min\\
+2. Protonated water cluster, \ce{(H2O)6H+}  & \texttt{wclusters.ipynb}  & $\sim$17 min\\
+3. Published models for aqueous systems     & \texttt{wsystems.ipynb}   & $\sim$18 min\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The computing time is the total time spent waiting for cells to finish,
+setup included. Most of it goes into training the neural networks and running
+molecular dynamics (MD). Reading, thinking and answering the questions come on
+top of it.
+
+%======================================================================
+\section{Step by step}
+%======================================================================
+
+\begin{enumerate}[leftmargin=*,itemsep=4pt]
+  \item \textbf{Open the tutorial in Colab.} On the course page, click on the
+        \menu{Open in Colab} button of the tutorial. The notebook opens in
+        Colab; sign in with your Google account if asked.
+
+  \item \textbf{Run the setup cell.} Click on the first code cell and press
+        \menu{Shift+Enter}. Colab warns that the notebook was not authored
+        by Google: click \menu{Run anyway}. The cell downloads the course files, installs n2p2 (to
+        train the neural networks) and CP2K (to run MD), and moves into the
+        tutorial's folder. It takes 1 to 2 minutes the first time, and prints
+        \texttt{Setup complete.} when it is done.
+
+        \begin{warnbox}{If the setup cell stops with ``Could not download TP-MLIP.zip''}
+        Download \texttt{TP-MLIP.zip} yourself from the \menu{Releases}
+        section of the course page (right-hand side). In Colab, click on the
+        folder icon in the left sidebar to open the \menu{Files} panel, drag
+        and drop the zip file into it, wait until the upload is finished, then
+        run the setup cell again.
+        \end{warnbox}
+
+  \item \textbf{Work through the notebook from top to bottom.} Run the cells
+        one by one with \menu{Shift+Enter}, reading the text as you go. The
+        questions are written in blue. Each cell uses the results of the cells
+        above it, so do not skip any.
+        \begin{itemize}[nosep]
+          \item MD cells call \texttt{run\_cp2k(...)}. While the simulation
+                runs, they print its latest step every 15 seconds, then
+                \texttt{Done in X min.} Wait for that line before moving on.
+          \item Training cells take a few minutes as well. The
+                active-learning cell prints a summary after each of its 15
+                iterations; again, wait until the cell has finished.
+        \end{itemize}
+
+  \item \textbf{Tutorials 2 and 3.} Open each notebook the same way
+        (step~1) and run its setup cell first. The tutorials do not depend on
+        each other: each one trains or downloads its own models.
+\end{enumerate}
+
+%======================================================================
+\section{Good to know}
+%======================================================================
+
+\paragraph{Keep the default CPU runtime.} Do not switch to a GPU in
+\menu{Runtime > Change runtime type}: n2p2 and CP2K only use the CPU.
+
+\paragraph{Looking at and editing files.} The tutorial files are in
+\texttt{/content/TP-MLIP}, which you can browse in the \menu{Files} panel.
+Double-click on a text file, such as a CP2K input (\texttt{*.inp}), to open it
+in an editor next to the notebook, and press \menu{Ctrl+S} to save your
+changes.
+
+\paragraph{Colab's files are temporary.} After some time without activity
+(typically around 90 minutes), when you close the tab for long, or after
+\menu{Runtime > Disconnect and delete runtime}, Colab gives you a fresh
+machine and everything computed so far is lost: trained models, trajectories,
+installed programs. Your notebook and its displayed outputs remain. To carry on,
+click on the cell where you stopped and use \menu{Runtime > Run before}: it
+runs the setup cell and all the other cells above it again.
+
+\paragraph{Saving your work.} The notebook opened from the course page is
+not saved anywhere. \menu{File > Save a copy in Drive} keeps a copy of the
+notebook with your notes and outputs (plots, scores), but not the files the
+notebook produced. To keep one of those, use the \menu{$\vdots$} menu next to it
+in the \menu{Files} panel and choose \menu{Download}.
+
+\paragraph{Training again with other settings.} The notebooks invite you to
+try other network architectures. Before training again, delete the previous
+results, or they will interfere with the new ones. Run this in a new code cell
+(\menu{+ Code}) before re-running the training cells:
+\begin{lstlisting}
+!rm -rf {base_dir}/qbc/iteration-* {base_dir}/qbc/results.shelf*
+!rm -rf {base_dir}/train/final_training
+\end{lstlisting}
+and, for the single model at the start of tutorial~1:
+\begin{lstlisting}
+!rm -rf {base_dir}/single/training
+\end{lstlisting}
+
+\begin{keybox}{Changing the number of committee members}
+The CP2K input files list the committee members one by one, in one
+\texttt{\&MODEL} block each (8 blocks). If you change \texttt{n\_members}, edit
+the \texttt{\&MODEL} blocks of the inputs used afterwards so that they match:
+\texttt{nnp\_md/zundel.inp} and \texttt{cluster/cluster.inp} in tutorial~1;
+\texttt{nnp\_md/cluster.inp}, \texttt{big\_cluster/big\_cluster.inp} and
+\texttt{bulk/bulk.inp} in tutorial~2.
+\end{keybox}
+
+\paragraph{If something goes wrong.} Use \menu{Runtime > Restart session},
+which keeps the files, then use \menu{Runtime > Run before} on the cell you
+were at. If it is still broken, use \menu{Runtime > Disconnect
+and delete runtime} and start again from the setup cell.
+
+\end{document}

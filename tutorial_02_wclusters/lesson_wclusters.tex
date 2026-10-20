@@ -1,0 +1,457 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{mhchem}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\usepackage{booktabs,tabularx}
+\usepackage{enumitem}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage[colorlinks=true,linkcolor=MidnightBlue,citecolor=ForestGreen,urlcolor=MidnightBlue]{hyperref}
+
+\sisetup{detect-all}
+\lstset{basicstyle=\ttfamily\small,columns=fullflexible,keepspaces=true,
+        frame=single,framerule=0.3pt,rulecolor=\color{gray!60},backgroundcolor=\color{gray!6}}
+
+\newtcolorbox{keybox}[1]{colback=MidnightBlue!4,colframe=MidnightBlue!70,
+  fonttitle=\bfseries,title=#1,boxrule=0.6pt,arc=2pt}
+\newtcolorbox{warnbox}[1]{colback=BrickRed!4,colframe=BrickRed!70,
+  fonttitle=\bfseries,title=#1,boxrule=0.6pt,arc=2pt}
+\newtcolorbox{nowbox}[1]{colback=ForestGreen!4,colframe=ForestGreen!70,
+  fonttitle=\bfseries,title=#1,boxrule=0.6pt,arc=2pt}
+\newcommand{\question}[1]{\par\smallskip\noindent\textcolor{MidnightBlue}{\textbf{Q.}~\emph{#1}}\par\smallskip}
+
+
+\title{\textbf{A neural network potential for water clusters}\\[4pt]
+\large Lesson notes accompanying \texttt{tutorial\_02\_wclusters/wclusters.ipynb}}
+\author{Machine-learned interatomic potentials --- hands-on session}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The second notebook applies the workflow of the Zundel tutorial --- committee
+neural networks, query by committee (QbC), MD in CP2K, validation by
+observables --- to a protonated water cluster \ce{(H2O)6H+}. It then asks the
+question that matters most in practice: \emph{how far does the model
+transfer?} It tests the model on a cluster almost three times larger,
+\ce{(H2O)16H+}, and on periodic bulk water. Finally, it questions the
+reference method itself. This is still a \textbf{basic, pedagogical
+example}: small clusters in vacuum, a semi-empirical reference and a tiny
+network. Its failures are as instructive as its successes. These notes assume
+you have done the Zundel tutorial and its lesson. The last section extends its
+discussion of the subtleties beyond the simple model with points specific to
+water.
+\end{abstract}
+
+\tableofcontents
+
+%======================================================================
+\section{From one ion to a cluster}
+%======================================================================
+
+The Zundel ion had 7 atoms, all within a single cutoff sphere. Every atom
+``saw'' the whole molecule, and the network effectively learned one global
+function. \ce{(H2O)6H+} (19 atoms) is the first system where the
+\emph{locality} of the Behler--Parrinello model really matters:
+\begin{itemize}[nosep]
+  \item The cluster is $\sim\SI{7.5}{\angstrom}$ across, more than the cutoff
+        $r_c = 12\,a_0 \approx \SI{6.35}{\angstrom}$, so atoms on opposite sides do
+        not see each other.
+  \item It contains a hydrogen-bond network. The excess proton can take
+        Zundel-like (\ce{H5O2+}) and Eigen-like (\ce{H9O4+}) local
+        configurations and hop between waters~\cite{Marx1999}. The model must
+        describe both, from local information only.
+  \item There are now many oxygens, so the O--O--O angular functions excluded
+        in tutorial~1 are switched back on (\texttt{exclude\_triples} is
+        commented out). Both elements now have 32 descriptors and 201 weights.
+\end{itemize}
+Protonated water clusters are a classic test case for MLIPs. They have been
+fitted up to coupled-cluster accuracy with exactly this type of model and an
+automated, committee-based selection of training
+data~\cite{Schran2020cc}.
+
+\begin{keybox}{What this example is --- and what it is not}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\textbf{Training system} & \ce{(H2O)6H+}, 19 atoms, vacuum.\\
+\textbf{Test systems} & \ce{(H2O)16H+} (49 atoms, vacuum); 64 \ce{H2O} in a periodic box (192 atoms, $NpT$).\\
+\textbf{Reference} & SCC-DFTB~\cite{Elstner1998}. Known to describe water--water interactions poorly (Sec.~\ref{sec:bulk}).\\
+\textbf{Model} & Same as tutorial 1: 2 hidden layers $\times$ 5 neurons per element, 8-member committee.\\
+\end{tabularx}
+\medskip
+A research model for aqueous systems would use a much better reference
+(hybrid DFT with dispersion, or coupled cluster), bigger or equivariant
+networks, and above all training data that include the condensed phase
+(Sec.~\ref{sec:novelty}).
+\end{keybox}
+
+%======================================================================
+\section{Reference data}
+%======================================================================
+
+All reference trajectories in \texttt{data/} were generated with SCC-DFTB in
+CP2K, with a Nos\'e--Hoover chain thermostat at \SI{300}{K}
+($\tau=\SI{50}{fs}$) and $\Delta t = \SI{0.5}{fs}$:
+\begin{center}\small
+\begin{tabular}{@{}lllll@{}}
+\toprule
+directory & system & atoms & ensemble, length & role\\
+\midrule
+\texttt{data/cluster}     & \ce{(H2O)6H+}  & 19  & NVT, \SI{25}{ps}, 10\,001 frames & training + validation\\
+\texttt{data/big\_cluster} & \ce{(H2O)16H+} & 49  & NVT, \SI{25}{ps}, 10\,001 frames & validation only\\
+\texttt{data/bulk}        & 64 \ce{H2O}    & 192 & $NpT$, \SI{1}{atm}, \SI{20}{ps} & density only (cell file)\\
+\bottomrule
+\end{tabular}
+\end{center}
+The key point: \textbf{the model is trained only on the small cluster.}
+Everything else tests transferability.
+
+\question{Before running anything: which local environments occur in bulk
+water but never in a 7-water cluster? Think about the number of neighbours
+inside a \SI{6.35}{\angstrom} sphere, and about surface molecules.}
+
+%======================================================================
+\section{Active learning on the cluster}
+%======================================================================
+
+This notebook skips the naive single model and goes directly to QbC, with the
+same settings as tutorial~1: 20 random initial structures, then 15 iterations
+that each add the 20 structures (out of 500 random candidates) with the largest
+force disagreement, using 8 members and 15 epochs. The final committee is
+retrained for 50 epochs on the last training set.
+
+\begin{table}[h]
+\centering\small
+\caption{Mean committee force disagreement (\si{meV/\angstrom}) during QbC on
+\ce{(H2O)6H+} in a test run, and wall time per iteration (8 cores).}
+\label{tab:qbc}
+\begin{tabular}{@{}rrrrrr@{}}
+\toprule
+iteration & training-set size & train & candidates & selected & time (s)\\
+\midrule
+1  & 20  & 129 & 151 & 228 & 12\\
+2  & 40  & 100 & 102 & 142 & 13\\
+3  & 60  &  79 &  75 &  98 & 13\\
+5  & 100 &  62 &  56 &  73 & 14\\
+10 & 193 &  50 &  43 &  51 & 16\\
+15 & 281 &  45 &  38 &  49 & 19\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Compare with the Zundel run (tutorial~1 lesson, Table~1):
+\begin{itemize}[nosep]
+  \item The initial disagreement is much lower (151 vs.\ \SI{695}{meV/\angstrom}
+        on candidates). The cluster offers many more atoms per structure, and
+        hence many more force labels, for the same 20 structures.
+  \item The final disagreement is similar ($\sim\SI{40}{meV/\angstrom}$), with a
+        similar number of training structures ($\sim$280).
+  \item This time the cost per iteration \emph{grows}, from 12 to \SI{19}{s}.
+        Training cost scales with the number of atoms in the training set, and
+        each structure now has 19 atoms instead of 7.
+  \item Late iterations re-select a few structures already in the set
+        (``$n$ already present''), a sign that the pool is exhausted.
+\end{itemize}
+
+\question{The disagreement converges to $\sim\SI{40}{meV/\angstrom}$, not to
+zero. What limits it: the data, the network size (10 hidden neurons), or the
+locality approximation? How could you tell them apart?}
+
+%======================================================================
+\section{MD and validation on the training system}
+%======================================================================
+
+The committee runs \SI{10}{ps} of NVT MD on \ce{(H2O)6H+} (\texttt{nnp\_md/}).
+In the test run it stayed stable: mean temperature \SI{297}{K} (reference
+\SI{303}{K}), and no molecule left the cluster.
+
+\begin{center}\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+score (\%) & \ce{H5O2+} (tut.~1) & \ce{(H2O)6H+} & \ce{(H2O)16H+}\\
+\midrule
+RDF O--O & 92.8 & 87.4 & 66.3\\
+RDF O--H & 97.0 & 91.0 & 82.9\\
+RDF H--H & 97.5 & 94.8 & 77.5\\
+VDOS (mean of O, H) & 90.6 & 79.9 & 82.4$^\ast$\\
+\bottomrule
+\end{tabular}\\[2pt]
+{\footnotesize Score $=100(1-\varepsilon)$, with $\varepsilon$ the normalised
+absolute deviation from the DFTB curve (tutorial~1 lesson, Sec.~6).
+$^\ast$Recomputed; see the warning box in Sec.~\ref{sec:big}.}
+\end{center}
+
+The scores are lower than for the Zundel ion, even on the training system.
+There are three reasons. The system is more complex, but the network is the
+same size. The NNP run is shorter than the reference (10 vs.\ \SI{25}{ps}),
+which adds statistical noise to the RDFs and, above all, to the spectra.
+And a cluster in vacuum is a ``soft'' object: its shape fluctuates and
+molecules can drift outwards.
+
+\begin{warnbox}{Molecules flying away}
+The notebook warns that you may see a water molecule leave the cluster, and
+attributes it to DFTB, which \emph{significantly} underestimates water--water
+interactions. This is not an NNP artefact: the DFTB reference does it too
+(see next section). An MLIP reproduces the physics of its reference,
+including the bad parts.
+\end{warnbox}
+
+%======================================================================
+\section{Transfer 1: a larger cluster, \ce{(H2O)16H+}}
+\label{sec:big}
+%======================================================================
+
+The same model now runs \SI{10}{ps} on a 49-atom cluster it has never seen
+(\texttt{big\_cluster/}), and is compared with a \SI{25}{ps} DFTB reference.
+The run is stable (mean \SI{302}{K}), but the RDF scores drop sharply,
+especially O--O (\SI{66}{\%}).
+
+\paragraph{Read the numbers critically.} In the test run:
+\begin{itemize}[nosep]
+  \item The \emph{DFTB reference} cluster loses water molecules. After
+        \SI{11.8}{ps} one oxygen sits more than \SI{8}{\angstrom} from the
+        centre of mass, and by \SI{25}{ps} three molecules have evaporated
+        (up to \SI{15.6}{\angstrom} away).
+  \item The NNP trajectory stops at \SI{10}{ps}, \emph{before} evaporation
+        would have happened in the reference. One molecule made a temporary
+        excursion beyond \SI{8}{\angstrom} at \SI{2.2}{ps} and came back.
+\end{itemize}
+Part of the low O--O score therefore comes from comparing \emph{different
+physical situations}: an intact cluster against one that is falling
+apart. It is not purely a model error. Comparisons by observables are only
+meaningful for equivalent, converged simulations: same length, same
+ensemble, same state of the system.
+
+\begin{warnbox}{Bug in the notebook: wrong VDOS for the big cluster}
+The last line of the big-cluster scoring cell reads
+\begin{lstlisting}
+mlps.run_vdos_test(ref_atv, dt_trj, nnp_atv, dt_trj)
+\end{lstlisting}
+It reuses the velocities of the \emph{small} cluster, so the printed VDOS
+score is just a copy of the previous one (79.8 / 80.0\,\%). The correct call is
+\begin{lstlisting}
+mlps.run_vdos_test(ref_big_atv, dt_trj, nnp_big_atv, dt_trj)
+\end{lstlisting}
+which in the test run gave 87.3\,\% (O) and 77.5\,\% (H), a mean of 82.4\,\%.
+\end{warnbox}
+
+\question{(Notebook) The scores seem almost reasonable, but from a visual
+inspection of the trajectories, are the dynamics well reproduced? What do you
+conclude about accuracy criteria, and about transferability?}
+
+%======================================================================
+\section{Transfer 2: bulk water}
+\label{sec:bulk}
+%======================================================================
+
+The last test is the hardest: 64 neutral water molecules in a periodic box,
+$NpT$ at \SI{1}{atm} and \SI{300}{K}, starting at
+$\rho = \SI{1.0}{g/cm^3}$ (\texttt{bulk/}, \SI{2.5}{ps}). Note the two
+changes at once: no excess proton, and no vacuum.
+
+\paragraph{What happened in the test run.} The NNP liquid \emph{expands}. The
+density fell from 1.00 to \SI{0.52}{g/cm^3} within \SI{2.5}{ps}, while the
+temperature peaked at \SI{1127}{K}. The model does not hold the liquid
+together. In bulk, each molecule has neighbours in every direction inside the
+cutoff, an environment entirely absent from a 7-water cluster, where every
+molecule sits at a surface. Concretely, an oxygen in the 7-water cluster has
+at most 6 other oxygens inside the cutoff; in the bulk box it has 28--38 (34 on
+average). The radial descriptors, which essentially count neighbours, take
+values far outside the training range. The network extrapolates, and the
+predicted forces (and hence the pressure) are meaningless.
+
+\paragraph{And the reference?} The notebook then plots the density of the
+DFTB bulk simulation (\texttt{data/bulk/bulk-1.cell}). It goes the other
+way: the box shrinks from 12.42 to \SI{11.13}{\angstrom}, and the density
+settles around \SI{1.41}{g/cm^3}, about 40\,\% above the experimental
+\SI{0.997}{g/cm^3}. This DFTB parametrisation produces a strongly
+over-structured, over-dense liquid. Even a perfect MLIP trained on it would be
+a perfect model of the wrong water.
+
+\question{(Notebook) What is happening in the NNP bulk run? Keep in mind that
+CP2K writes unwrapped coordinates, and that nglview does not handle periodic
+boundary conditions, so molecules seem to ``leave'' the box even in a
+healthy simulation. Why is the density (cell file) a more reliable
+diagnostic here than the movie?}
+
+\begin{keybox}{Lessons of this tutorial}
+\begin{enumerate}[nosep,leftmargin=*]
+  \item \textbf{Locality enables transfer, data limit it.} A local model can
+        run on any system size, but it is only reliable for local environments
+        represented in its training set.
+  \item \textbf{Validate with care.} Observable-based scores depend on how the
+        comparison is set up (run length, state of the system), and the code
+        that computes them can have bugs.
+  \item \textbf{The reference sets the ceiling.} Check the reference method
+        against experiment or a higher level of theory \emph{before} investing
+        in the ML model.
+\end{enumerate}
+\end{keybox}
+
+%======================================================================
+\section{Going further: subtleties beyond the simple model}
+\label{sec:novelty}
+%======================================================================
+
+The general refinements --- equivariant message-passing networks, foundation
+models and fine-tuning, long-range electrostatics, energy-conserving
+benchmarks --- are summarised in Sec.~8 of the Zundel lesson. Here are the
+points specific to this tutorial.
+
+\paragraph{Clusters \emph{can} teach the bulk, if done right.} This tutorial
+shows a cluster-trained model failing in bulk. Yet one study did exactly
+the opposite, on purpose: it trained a Behler--Parrinello network on
+\emph{finite clusters} computed with CCSD(T), the ``gold standard'' of quantum
+chemistry, which is unaffordable for periodic liquids. The model then ran
+coupled-cluster-quality MD of bulk liquid water, including nuclear quantum
+effects~\cite{Daru2022}. The difference: their clusters are large and chosen
+so that, within the cutoff, they contain bulk-like environments, and the
+selection is automated~\cite{Schran2020cc}. Transferability is a property of
+the \emph{training set}, not of the model.
+
+\paragraph{Better references are affordable.} Because MLIPs are cheap, the
+reference can be expensive. Hybrid DFT with dispersion is the usual choice
+for aqueous systems~\cite{Schran2021}, and coupled-cluster-level models of
+water exist~\cite{Daru2022}. A production water model would not be built on
+SCC-DFTB. In this tutorial it is a deliberate choice, to keep the data
+cheap and to show what a poor reference does.
+
+\paragraph{Active learning in the loop.} Here QbC only selects from an
+\emph{existing} DFTB trajectory. In research workflows the committee runs the
+MD itself. Configurations with high disagreement (for example, the first
+frames of the bulk run above) are sent for new reference calculations and
+added to the training set, iteratively, until the disagreement stays low in
+production~\cite{Schran2020,Schran2021}. Tutorial~3 uses models built this
+way for water at interfaces, in confinement and with ions.
+
+\paragraph{Foundation models as a starting point.} A pretrained universal
+model~\cite{Batatia2023,Wood2025} would not explode in bulk water the way this
+model does: it has seen condensed phases. But its accuracy for water depends
+on the reference functional of its training data, and charged clusters such
+as \ce{(H2O)_nH+} need a model trained on charged systems (e.g.\ on
+OMol25~\cite{Levine2025}). A natural refinement is to fine-tune such a model on a
+few hundred structures selected by committee disagreement. That is the same
+idea as QbC, applied to a much better starting point.
+
+\paragraph{Long-range electrostatics and the excess charge.} A $+1$ cluster
+in vacuum has a net charge, and its surface molecules have a long-range
+electrostatic environment that a $\SI{6.35}{\angstrom}$ cutoff cannot see.
+Charge-aware architectures~\cite{Ko2021,Cheng2024} address exactly this.
+
+%======================================================================
+\section{Exercises}
+%======================================================================
+\begin{enumerate}
+  \item Plot the training points selected by QbC on top of $E_p(t)$. Compare
+        with the Zundel case.
+  \item Change the architecture (\texttt{n\_hidden}, \texttt{n\_neurons}). Does
+        the final committee disagreement go below
+        $\sim\SI{40}{meV/\angstrom}$? (Remember to delete the old
+        \texttt{qbc/iteration-*}, \texttt{qbc/results.shelf.*} and
+        \texttt{train/final\_training} directories first, as the notebook says.)
+  \item Fix the VDOS line for the big cluster and compare the scores.
+  \item Make the big-cluster comparison fair: score the NNP run against only
+        the first \SI{10}{ps} of the reference (use the \texttt{stop} argument of
+        \texttt{mlps.load\_with\_cell}). How much do the RDF scores change?
+  \item Monitor the cluster's integrity, e.g.\ the largest distance of an
+        oxygen from the centre of mass, in the reference and NNP runs of both
+        clusters.
+  \item Bulk water: in \texttt{bulk/bulk.inp}, the per-member energies are
+        switched off (\texttt{\&ENERGIES OFF} in the \texttt{\&NNP/\&PRINT}
+        section; the same holds for the cluster inputs). Switch them on as in
+        tutorial~1's \texttt{zundel.inp} (\texttt{\&ENERGIES SILENT} with
+        \texttt{\&EACH MD 1}), rerun, and compute
+        the committee energy spread along the trajectory. When does it blow
+        up compared with the density? How would an active-learning loop use
+        this?
+  \item Discuss: what training set would you need for a model of bulk water?
+        Of the air--water interface?
+\end{enumerate}
+
+%======================================================================
+\section{Running times}
+%======================================================================
+Measured on an 8-core workstation (one core per committee member):
+
+\begin{center}\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+step & wall time\\
+\midrule
+QbC (15 iterations, 8 members) & \SI{3.9}{min}\\
+final training (8 members, 281 structures, 50 epochs) & \SI{48}{s}\\
+\ce{(H2O)6H+} MD (\num{20000} steps, \SI{10}{ps}) & \SI{46}{s}\\
+\ce{(H2O)16H+} MD (\num{20000} steps, \SI{10}{ps}) & \SI{1.6}{min}\\
+bulk water $NpT$ MD (\num{5000} steps, \SI{2.5}{ps}, 192 atoms) & \SI{6.1}{min}\\
+\bottomrule
+\end{tabular}
+\end{center}
+The bulk run is the longest step. Start it as soon as the final model is
+trained, and do the big-cluster analysis while it runs.
+
+%======================================================================
+\begin{thebibliography}{99}
+\small
+
+\bibitem{Marx1999} D.~Marx, M.~E.~Tuckerman, J.~Hutter and M.~Parrinello,
+  \emph{The nature of the hydrated excess proton in water},
+  Nature \textbf{397}, 601 (1999).
+
+\bibitem{Schran2020cc} C.~Schran, J.~Behler and D.~Marx,
+  \emph{Automated fitting of neural network potentials at coupled cluster
+  accuracy: protonated water clusters as testing ground},
+  J.\ Chem.\ Theory Comput.\ \textbf{16}, 88 (2020); arXiv:1908.08734.
+
+\bibitem{Elstner1998} M.~Elstner \emph{et al.},
+  \emph{Self-consistent-charge density-functional tight-binding method for
+  simulations of complex materials properties}, Phys.\ Rev.\ B \textbf{58},
+  7260 (1998).
+
+\bibitem{Schran2020} C.~Schran, K.~Brezina and O.~Marsalek,
+  \emph{Committee neural network potentials control generalization errors and
+  enable active learning}, J.\ Chem.\ Phys.\ \textbf{153}, 104105 (2020).
+
+\bibitem{Schran2021} C.~Schran, F.~L.~Thiemann, P.~Rowe, E.~A.~M\"uller,
+  O.~Marsalek and A.~Michaelides,
+  \emph{Machine learning potentials for complex aqueous systems made simple},
+  Proc.\ Natl.\ Acad.\ Sci.\ USA \textbf{118}, e2110077118 (2021);
+  arXiv:2106.00048.
+
+\bibitem{Daru2022} J.~Daru, H.~Forbert, J.~Behler and D.~Marx,
+  \emph{Coupled cluster molecular dynamics of condensed phase systems enabled
+  by machine learning potentials: liquid water benchmark},
+  Phys.\ Rev.\ Lett.\ \textbf{129}, 226001 (2022).
+
+\bibitem{Batatia2023} I.~Batatia \emph{et al.},
+  \emph{A foundation model for atomistic materials chemistry},
+  arXiv:2401.00096 (2023).
+
+\bibitem{Wood2025} B.~M.~Wood \emph{et al.},
+  \emph{UMA: A family of universal models for atoms}, arXiv:2506.23971 (2025).
+
+\bibitem{Levine2025} D.~S.~Levine \emph{et al.},
+  \emph{The Open Molecules 2025 (OMol25) dataset, evaluations, and models},
+  arXiv:2505.08762 (2025).
+
+\bibitem{Ko2021} T.~W.~Ko, J.~A.~Finkler, S.~Goedecker and J.~Behler,
+  \emph{A fourth-generation high-dimensional neural network potential with
+  accurate electrostatics including non-local charge transfer},
+  Nat.\ Commun.\ \textbf{12}, 398 (2021).
+
+\bibitem{Cheng2024} B.~Cheng,
+  \emph{Latent Ewald summation for machine learning of long-range
+  interactions}, arXiv:2408.15165 (2024).
+
+\end{thebibliography}
+
+\end{document}
