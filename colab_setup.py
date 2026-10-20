@@ -1,12 +1,13 @@
 """Set up a Google Colab runtime for the TP-MLIP tutorials.
 
 Each notebook runs this file with `%run /content/TP-MLIP/colab_setup.py` in its first cell.
-It installs n2p2, CP2K and the Python packages, makes `import aml` work and defines `run_cp2k()`.
+It installs n2p2, CP2K and the Python packages, makes `import aml` work and defines `run_cp2k()` and `show_md()`.
 Running it again is cheap: anything already installed is skipped.
 """
 
 import glob
 import importlib.metadata
+import math
 import os
 import site
 import subprocess
@@ -54,21 +55,19 @@ def _install_cp2k():
 
 
 def _install_python_packages():
-    # nglview is pinned to 3.0.8: Colab fetches the widget's JavaScript from a CDN by version, and the
-    # frontends of nglview >= 3.1.4 are not on npm (the viewer stays blank); they also replace Colab's
-    # ipywidgets 7 with ipywidgets 8. 3.0.8 only exists as an sdist that no longer builds on Python 3.13
-    # (its build imports the removed `pipes` module), so we ship a pure-Python wheel built on Python 3.12.
+    # Trajectories are shown with py3Dmol (see show_md) rather than nglview: Colab creates two views of
+    # every custom widget (googlecolab/colabtools#2853), so nglview leaves the first frame on top of the
+    # animation. py3Dmol writes plain HTML/JavaScript and needs no widget manager.
     missing = []
-    for package, version, source in [('mdtraj', None, 'mdtraj'), ('ase', None, 'ase'),
-                                     ('nglview', '3.0.8', f'{TP_DIR}/wheels/nglview-3.0.8-py3-none-any.whl')]:
+    for package, version in [('mdtraj', None), ('ase', None), ('py3Dmol', '2.5.5')]:
         try:
             installed = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
             installed = None
         if installed is None or (version is not None and installed != version):
-            missing.append(source)
+            missing.append(package if version is None else f'{package}=={version}')
     if missing:
-        print(f'Installing {" ".join(os.path.basename(m) for m in missing)}...', flush=True)
+        print(f'Installing {" ".join(missing)}...', flush=True)
         _sh(f'{sys.executable} -m pip install -q {" ".join(missing)}')
 
 
@@ -98,13 +97,6 @@ def _set_environment():
     with open(os.path.join(site.getsitepackages()[0], 'tp_mlip.pth'), 'w') as f:
         f.write(TP_DIR + '\n')
     sys.path.append(TP_DIR)
-
-    # nglview widgets need Colab's custom widget manager
-    try:
-        from google.colab import output
-        output.enable_custom_widget_manager()
-    except ImportError:
-        pass
 
 
 def run_cp2k(fn_input, directory='.', fn_output='output', refresh=15):
@@ -139,6 +131,46 @@ def run_cp2k(fn_input, directory='.', fn_output='output', refresh=15):
                     print(''.join(f.readlines()[-30:]))
         raise RuntimeError(f'CP2K failed (exit code {process.returncode}), see {directory}/{fn_output}')
     print(f'Done in {(time.time() - t_start) / 60:.1f} min.')
+
+
+def show_md(system, max_frames=300, max_atom_frames=100000, width=640, height=420, interval=60):
+    """Show a trajectory (mdtraj.Trajectory) or a single structure (ase.Atoms) in 3D, with py3Dmol.
+
+    A trajectory plays in a loop, one frame every `interval` ms. Long trajectories are thinned to at
+    most `max_frames` frames and `max_atom_frames` atoms x frames, to keep the notebook light.
+    Bonds are guessed from distances in each frame. Coordinates are shown as they are, without
+    wrapping them back into the periodic cell.
+    """
+    import py3Dmol
+
+    if hasattr(system, 'xyz'):
+        # mdtraj trajectory, positions in nm
+        symbols = [atom.element.symbol for atom in system.topology.atoms]
+        frames = 10 * system.xyz
+    else:
+        # ase Atoms, positions in Angstrom
+        symbols = system.get_chemical_symbols()
+        frames = system.get_positions()[None]
+    n_frames, n_atoms = frames.shape[:2]
+
+    stride = max(1, math.ceil(n_frames / max_frames), math.ceil(n_frames * n_atoms / max_atom_frames))
+    frames = frames[::stride]
+    if stride > 1:
+        print(f'Showing {len(frames)} of {n_frames} frames (one in {stride}).')
+
+    blocks = []
+    for positions in frames:
+        lines = [str(n_atoms), '']
+        lines += [f'{s} {x:.3f} {y:.3f} {z:.3f}' for s, (x, y, z) in zip(symbols, positions)]
+        blocks.append('\n'.join(lines))
+
+    view = py3Dmol.view(width=width, height=height)
+    view.addModelsAsFrames('\n'.join(blocks) + '\n', 'xyz')
+    view.setStyle({'stick': {'radius': 0.12}, 'sphere': {'scale': 0.22}})
+    if len(frames) > 1:
+        view.animate({'loop': 'forward', 'interval': interval})
+    view.zoomTo()
+    return view
 
 
 _install_n2p2()
